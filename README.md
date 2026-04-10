@@ -36,6 +36,26 @@ Place challenge files under the **repository root** so defaults in `melanoma/con
 
 **Note:** Image folders are **gitignored** (too large). Clone the repo, then download and unzip ISIC 2016 assets into the paths above.
 
+### 2.1 Downloading ISBI / ISIC 2016 data
+
+Official challenge data index (expand **2016**): [ISIC Challenge — Data](https://challenge.isic-archive.com/data/).
+
+For this repository, download and unzip the following into the **repository root** (same folder as `README.md`). Direct links mirror the official table:
+
+| What you need | Official file | Direct download |
+|---------------|---------------|-----------------|
+| Training images (~900 JPG) | `ISBI2016_ISIC_Part1_Training_Data.zip` | [Part 1 training images](https://isic-archive.s3.amazonaws.com/challenges/2016/ISBI2016_ISIC_Part1_Training_Data.zip) |
+| Training segmentation masks | `ISBI2016_ISIC_Part1_Training_GroundTruth.zip` | [Part 1 training masks](https://isic-archive.s3.amazonaws.com/challenges/2016/ISBI2016_ISIC_Part1_Training_GroundTruth.zip) |
+| Training class labels (CSV) | `ISBI2016_ISIC_Part3_Training_GroundTruth.csv` | [Part 3 training labels](https://isic-archive.s3.amazonaws.com/challenges/2016/ISBI2016_ISIC_Part3_Training_GroundTruth.csv) |
+| Test images (379 JPG) | `ISBI2016_ISIC_Part3B_Test_Data.zip` | [Part 3B test images](https://isic-archive.s3.amazonaws.com/challenges/2016/ISBI2016_ISIC_Part3B_Test_Data.zip) |
+| Test labels (CSV) | `ISBI2016_ISIC_Part3B_Test_GroundTruth.csv` | [Part 3B test labels](https://isic-archive.s3.amazonaws.com/challenges/2016/ISBI2016_ISIC_Part3B_Test_GroundTruth.csv) |
+
+**Unzip layout:** Archives usually create folders whose names already match the first column of the table in §2 (e.g. `ISBI2016_ISIC_Part1_Training_Data/`). The Part 1 mask zip often contains a **nested** folder `ISBI2016_ISIC_Part1_Training_GroundTruth/` twice; keep that structure so `melanoma/config.py` path to masks resolves.
+
+You do **not** need the separate `ISBI2016_ISIC_Part3_Training_Data.zip` for this code if you already have Part 1 training images (same 900 lesions; labels come from the Part 3 CSV).
+
+License for the 2016 challenge data is **CC-0** (see the [data page](https://challenge.isic-archive.com/data/)). Cite the challenge paper when you publish (see §7).
+
 ---
 
 ## 3. Method 1 — train & validate
