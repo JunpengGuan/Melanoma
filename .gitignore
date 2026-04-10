@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+.env
+.pptx-venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS / Office
+.DS_Store
+Thumbs.db
+~$*.pptx
+~$*.docx
+
+# Trained artifacts (regenerate with training scripts; large for Git)
+checkpoints/*.pt
+checkpoints/*.joblib
+checkpoints/*.json
+
+# Local ISIC / ISBI image data (download separately; see README)
+ISBI2016_ISIC_Part*/
+
+# Optional: keep generated decks out of repo
+# *.pptx
