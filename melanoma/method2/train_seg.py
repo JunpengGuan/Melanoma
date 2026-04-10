@@ -17,6 +17,7 @@ from melanoma.method2.data_seg import LesionSegDataset, filter_rows_with_masks
 from melanoma.method2.losses import SegmentationLoss
 from melanoma.method2.seg_metrics import mean_dice_soft, mean_iou_binary
 from melanoma.method2.unet import build_unet
+from melanoma.train_report import merge_train_report
 
 
 def main() -> None:
@@ -64,6 +65,7 @@ def main() -> None:
 
     args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
 
+    tr = vd = vi = 0.0
     for epoch in range(1, args.epochs + 1):
         model.train()
         running = 0.0
@@ -85,6 +87,33 @@ def main() -> None:
 
     torch.save({"model": model.state_dict()}, args.checkpoint)
     print(f"saved {args.checkpoint}")
+
+    train_eval_loader = DataLoader(
+        Subset(ds, train_idx),
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=True,
+    )
+    train_dice = float(mean_dice_soft(model, train_eval_loader, device))
+    train_iou = float(mean_iou_binary(model, train_eval_loader, device, thresh=0.5))
+    merge_train_report(
+        "method2_segmentation",
+        {
+            "epochs": args.epochs,
+            "val_ratio": args.val_ratio,
+            "seed": args.seed,
+            "device": str(device),
+            "train_samples": len(train_idx),
+            "val_samples": len(val_idx),
+            "train_loss_last_epoch": tr,
+            "train_dice_soft": train_dice,
+            "train_iou_0.5": train_iou,
+            "val_dice_soft": float(vd),
+            "val_iou_0.5": float(vi),
+            "checkpoint": str(args.checkpoint),
+        },
+    )
 
 
 if __name__ == "__main__":

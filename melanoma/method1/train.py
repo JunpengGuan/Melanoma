@@ -5,10 +5,12 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, Subset
 
 from melanoma.config import DEFAULT_IMAGE_DIR, DEFAULT_LABEL_CSV, PROJECT_ROOT
-from melanoma.method1.data import load_rows, make_loaders
+from melanoma.method1.data import LesionImageDataset, load_rows, make_loaders, stratified_split
 from melanoma.method1.models import build_classifier
+from melanoma.train_report import merge_train_report
 
 
 @torch.no_grad()
@@ -28,6 +30,21 @@ def eval_epoch(model: nn.Module, loader, device: torch.device, criterion) -> tup
         correct += (pred.eq(y).all(dim=1)).sum().item()
         n += x.size(0)
     return total_loss / max(1, n), correct / max(1, n)
+
+
+@torch.no_grad()
+def collect_probs(model: nn.Module, loader, device: torch.device) -> tuple[list[float], list[int]]:
+    model.eval()
+    probs: list[float] = []
+    labels: list[int] = []
+    for x, y in loader:
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True).view(-1, 1)
+        logits = model(x)
+        p = torch.sigmoid(logits).squeeze(-1).cpu()
+        probs.extend(p.tolist())
+        labels.extend(y.int().view(-1).tolist())
+    return probs, labels
 
 
 def main() -> None:
@@ -54,7 +71,7 @@ def main() -> None:
     n_neg = len(rows) - n_pos
     pos_weight = torch.tensor([n_neg / max(1, n_pos)], device=device)
 
-    train_loader, val_loader, _ = make_loaders(
+    train_loader, val_loader, rows = make_loaders(
         args.image_dir,
         args.label_csv,
         val_ratio=args.val_ratio,
@@ -96,6 +113,47 @@ def main() -> None:
     ckpt = args.checkpoint_dir / f"{args.backbone}_last.pt"
     torch.save({"model": model.state_dict(), "backbone": args.backbone}, ckpt)
     print(f"saved {ckpt}")
+
+    train_idx, val_idx = stratified_split(rows, val_ratio=args.val_ratio, seed=args.seed)
+    full_eval = LesionImageDataset(rows, args.image_dir, train=False)
+    train_eval_loader = DataLoader(
+        Subset(full_eval, train_idx),
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=True,
+    )
+    tr_loss, tr_acc = eval_epoch(model, train_eval_loader, device, criterion)
+    va_loss, va_acc = eval_epoch(model, val_loader, device, criterion)
+    v_probs, v_labels = collect_probs(model, val_loader, device)
+    val_auc: float | None
+    try:
+        from sklearn.metrics import roc_auc_score
+
+        val_auc = (
+            float(roc_auc_score(v_labels, v_probs))
+            if len(set(v_labels)) >= 2
+            else float("nan")
+        )
+    except ImportError:
+        val_auc = None
+
+    report = {
+        "backbone": args.backbone,
+        "epochs": args.epochs,
+        "val_ratio": args.val_ratio,
+        "seed": args.seed,
+        "device": str(device),
+        "train_samples": len(train_idx),
+        "val_samples": len(val_idx),
+        "train_loss": tr_loss,
+        "train_acc": tr_acc,
+        "val_loss": va_loss,
+        "val_acc": va_acc,
+        "val_auc_roc": val_auc,
+        "checkpoint": str(ckpt),
+    }
+    merge_train_report("method1", report)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,71 @@ def run_eval(
     return probs, labels
 
 
+def method1_test_metrics(
+    *,
+    checkpoint: Path,
+    image_dir: Path,
+    label_csv: Path,
+    backbone: str | None,
+    batch_size: int,
+    num_workers: int,
+    threshold: float,
+) -> dict:
+    """Evaluate Method 1 on a folder + CSV (default: Part3B test). Returns metric dict."""
+    from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+    resolved = backbone or ckpt.get("backbone")
+    if not resolved:
+        raise ValueError("Checkpoint has no 'backbone'; pass backbone=...")
+
+    all_rows = load_rows(label_csv)
+    rows = filter_existing_rows(all_rows, image_dir)
+    if not rows:
+        raise ValueError("No labeled images found (check paths and .jpg names).")
+    skipped = len(all_rows) - len(rows)
+
+    ds = LesionImageDataset(rows, image_dir, train=False)
+    loader = DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    model = build_classifier(str(resolved), pretrained=False)
+    model.load_state_dict(ckpt["model"], strict=True)
+    model.to(device)
+
+    probs, y_true = run_eval(model, loader, device)
+    y_pred = [1 if p >= threshold else 0 for p in probs]
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    sens = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
+    spec = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
+    auc = (
+        float(roc_auc_score(y_true, probs))
+        if len(set(y_true)) >= 2
+        else float("nan")
+    )
+    return {
+        "split": "test",
+        "samples": len(y_true),
+        "skipped_missing_jpg": skipped,
+        "device": str(device),
+        "backbone": str(resolved),
+        "threshold": threshold,
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "sensitivity": sens,
+        "specificity": spec,
+        "tn": int(tn),
+        "fp": int(fp),
+        "fn": int(fn),
+        "tp": int(tp),
+        "auc_roc": auc,
+    }
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Evaluate Method-1 checkpoint on a held-out set (JPG folder + CSV labels).",
@@ -81,46 +146,31 @@ def main() -> None:
             "Need scikit-learn for metrics. Run: pip install scikit-learn",
         ) from e
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
-    backbone = args.backbone or ckpt.get("backbone")
-    if not backbone:
-        raise SystemExit("Checkpoint has no 'backbone'; pass --backbone efficientnet_b0 (or vit_b_16).")
+    try:
+        m = method1_test_metrics(
+            checkpoint=args.checkpoint,
+            image_dir=args.image_dir,
+            label_csv=args.label_csv,
+            backbone=args.backbone,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            threshold=args.threshold,
+        )
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
 
-    rows = load_rows(args.label_csv)
-    rows = filter_existing_rows(rows, args.image_dir)
-    if not rows:
-        raise SystemExit("No labeled images found (check --image-dir and --label-csv, and .jpg names).")
+    if m["skipped_missing_jpg"]:
+        print(f"warning: skipped {m['skipped_missing_jpg']} rows with missing JPG under {args.image_dir}")
 
-    skipped = len(load_rows(args.label_csv)) - len(rows)
-    if skipped:
-        print(f"warning: skipped {skipped} rows with missing JPG under {args.image_dir}")
-
-    ds = LesionImageDataset(rows, args.image_dir, train=False)
-    loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
-
-    model = build_classifier(str(backbone), pretrained=False)
-    model.load_state_dict(ckpt["model"], strict=True)
-    model.to(device)
-
-    probs, y_true = run_eval(model, loader, device)
-    y_score = probs
-    y_pred = [1 if p >= args.threshold else 0 for p in probs]
-
-    print(f"samples: {len(y_true)}  device: {device}  backbone: {backbone}")
-    print(f"accuracy @ {args.threshold}: {accuracy_score(y_true, y_pred):.4f}")
-
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
-    sens = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
-    spec = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
-    print(f"sensitivity (malignant recall): {sens:.4f}")
-    print(f"specificity: {spec:.4f}")
-    print(f"confusion_matrix [tn fp; fn tp]:\n  TN={tn} FP={fp}\n  FN={fn} TP={tp}")
-
-    if len(set(y_true)) < 2:
-        print("auc_roc: n/a (only one class in labels)")
-    else:
-        print(f"auc_roc: {roc_auc_score(y_true, y_score):.4f}")
+    print(f"samples: {m['samples']}  device: {m['device']}  backbone: {m['backbone']}")
+    print(f"accuracy @ {m['threshold']}: {m['accuracy']:.4f}")
+    print(f"sensitivity (malignant recall): {m['sensitivity']:.4f}")
+    print(f"specificity: {m['specificity']:.4f}")
+    print(
+        f"confusion_matrix [tn fp; fn tp]:\n  TN={m['tn']} FP={m['fp']}\n  FN={m['fn']} TP={m['tp']}",
+    )
+    auc = m["auc_roc"]
+    print(f"auc_roc: {auc:.4f}" if auc == auc else "auc_roc: n/a (only one class in labels)")
 
 
 if __name__ == "__main__":

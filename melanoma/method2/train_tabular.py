@@ -25,12 +25,38 @@ from melanoma.method2.abcd import extract_abcd
 from melanoma.method2.data_seg import filter_rows_with_masks, load_binary_mask, mask_path_for_id
 from melanoma.method2.infer import load_rgb_hwc_uint8, predict_mask_bool
 from melanoma.method2.unet import build_unet
+from melanoma.train_report import merge_train_report
 
 
 def gt_mask_bool(mask_dir: Path, image_id: str, size: int) -> np.ndarray:
     path = mask_path_for_id(mask_dir, image_id)
     t = load_binary_mask(path, (size, size))
     return t.squeeze(0).numpy().astype(bool)
+
+
+def _cls_metrics(y_true: list[int], probs: list[float], threshold: float) -> dict:
+    from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
+
+    y_pred = [1 if p >= threshold else 0 for p in probs]
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    sens = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
+    spec = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
+    auc = (
+        float(roc_auc_score(y_true, probs))
+        if len(set(y_true)) >= 2
+        else float("nan")
+    )
+    return {
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "sensitivity": sens,
+        "specificity": spec,
+        "tn": int(tn),
+        "fp": int(fp),
+        "fn": int(fn),
+        "tp": int(tp),
+        "auc_roc": auc,
+        "threshold": threshold,
+    }
 
 
 def main() -> None:
@@ -44,12 +70,13 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--lr-out", type=Path, default=DEFAULT_METHOD2_LR)
     p.add_argument("--xgb-out", type=Path, default=DEFAULT_METHOD2_XGB)
+    p.add_argument("--val-threshold", type=float, default=0.5)
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     rows = load_rows(args.label_csv)
     rows = filter_rows_with_masks(rows, args.image_dir, args.mask_dir)
-    train_idx, _ = stratified_split(rows, val_ratio=args.val_ratio, seed=args.seed)
+    train_idx, val_idx = stratified_split(rows, val_ratio=args.val_ratio, seed=args.seed)
 
     unet = None
     if not args.use_gt_mask:
@@ -112,6 +139,39 @@ def main() -> None:
     clf_xgb.fit(X, y)
     clf_xgb.save_model(str(args.xgb_out))
     print(f"saved {args.xgb_out}")
+
+    probs_lr: list[float] = []
+    probs_xgb: list[float] = []
+    y_val: list[int] = []
+    for i in val_idx:
+        image_id, y = rows[i]
+        img_path = args.image_dir / f"{image_id}.jpg"
+        rgb = load_rgb_hwc_uint8(img_path, SEG_IMG_SIZE)
+        if args.use_gt_mask:
+            mbool = gt_mask_bool(args.mask_dir, image_id, SEG_IMG_SIZE)
+        else:
+            mbool = predict_mask_bool(unet, img_path, device, SEG_IMG_SIZE)
+        feat = extract_abcd(rgb, mbool).reshape(1, -1)
+        probs_lr.append(float(pipe.predict_proba(feat)[0, 1]))
+        probs_xgb.append(float(clf_xgb.predict_proba(feat)[0, 1]))
+        y_val.append(int(y))
+
+    thr = args.val_threshold
+    merge_train_report(
+        "method2_tabular",
+        {
+            "val_ratio": args.val_ratio,
+            "seed": args.seed,
+            "use_gt_mask": args.use_gt_mask,
+            "device": str(device),
+            "train_samples": len(train_idx),
+            "val_samples": len(y_val),
+            "lr": _cls_metrics(y_val, probs_lr, thr),
+            "xgb": _cls_metrics(y_val, probs_xgb, thr),
+            "lr_checkpoint": str(args.lr_out),
+            "xgb_checkpoint": str(args.xgb_out),
+        },
+    )
 
 
 if __name__ == "__main__":

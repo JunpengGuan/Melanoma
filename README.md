@@ -51,14 +51,16 @@ python -m melanoma.method1.train \
 
 - Weights: `checkpoints/efficientnet_b0_last.pt` (default `--checkpoint-dir`).
 - **Validation:** same run — look for `val_loss`, `val_acc` in the console (hold-out ratio `--val-ratio`, default `0.15`).
+- **Train report:** after training, final **train/val** loss, accuracy, and val **AUC** are merged into `results/train_report.json` and `results/train_report.txt` under the `method1` section.
 
-**Test / held-out evaluation** (379 test images + CSV):
+**Test / held-out evaluation** (379 test images + CSV) — one-shot report for Method 1 + Method 2:
 
 ```bash
-python -m melanoma.method1.eval_test \
-  --checkpoint checkpoints/efficientnet_b0_last.pt \
-  --backbone efficientnet_b0
+python -m melanoma.test_report
 ```
+
+Writes `results/test_metrics.json` and `results/test_metrics.txt`.  
+Or run Method 1 only: `python -m melanoma.method1.eval_test --checkpoint checkpoints/efficientnet_b0_last.pt --backbone efficientnet_b0`
 
 Defaults point to `ISBI2016_ISIC_Part3B_Test_Data` and `ISBI2016_ISIC_Part3B_Test_GroundTruth.csv`.  
 Output: accuracy, sensitivity, specificity, confusion matrix, **AUC-ROC**.
@@ -85,6 +87,7 @@ python -m melanoma.method2.train_seg \
 
 - Weights: `checkpoints/unet_last.pt`.
 - **Validation:** `val_dice` (soft Dice) and `val_iou` (binary IoU at 0.5) on the stratified val split.
+- **Train report:** after training, final **train/val** Dice & IoU (and last train loss) are merged into `results/train_report.*` under `method2_segmentation`.
 
 **Segmentation-only metrics** (reload checkpoint, same val split):
 
@@ -105,6 +108,8 @@ Saves:
 - `checkpoints/method2_lr.joblib` — `StandardScaler` + Logistic Regression  
 - `checkpoints/method2_xgb.json` — XGBoost model  
 
+**Train report:** after training, **LR** and **XGB** metrics on the held-out **val** split (same `val_ratio` / `seed` as training) are merged into `results/train_report.*` under `method2_tabular`.
+
 **Oracle upper bound** (ground-truth masks instead of U-Net):
 
 ```bash
@@ -112,6 +117,8 @@ python -m melanoma.method2.train_tabular --use-gt-mask
 ```
 
 ### Stage C — Test evaluation (segmentation + classifier)
+
+Use `python -m melanoma.test_report` (Method 1 + Method 2 LR + XGB in one file under `results/`), or:
 
 ```bash
 python -m melanoma.method2.eval_test --classifier lr
@@ -127,8 +134,11 @@ Loads `unet_last.pt` + the chosen classifier; same test paths as Method 1 by def
 ```
 melanoma/
   config.py              # default paths
+  train_report.py        # merge training metrics → results/train_report.*
+  test_report.py         # Part3B test metrics → results/test_metrics.*
   method1/               # CNN classification
   method2/               # U-Net, ABCD, tabular, eval_seg
+results/                 # train_report / test_metrics (created when you run scripts)
 scripts/
   build_presentation.py  # optional: English deck (needs python-pptx)
 requirements.txt

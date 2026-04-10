@@ -29,3 +29,7 @@ ISBI2016_ISIC_Part*/
 
 # Optional: keep generated decks out of repo
 # *.pptx
+
+# Metrics reports (regenerate: train_*.py, test_report.py)
+results/*.txt
+results/*.json
