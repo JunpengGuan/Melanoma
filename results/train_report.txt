@@ -1,0 +1,68 @@
+Train report  (last update UTC 2026-04-10T04:43:01Z)
+
+=== method1 ===
+{
+  "backbone": "efficientnet_b0",
+  "epochs": 2,
+  "val_ratio": 0.15,
+  "seed": 42,
+  "device": "cuda",
+  "train_samples": 765,
+  "val_samples": 135,
+  "train_loss": 0.6796909134372388,
+  "train_acc": 0.7241830065359477,
+  "val_loss": 0.9646770830507632,
+  "val_acc": 0.6444444444444445,
+  "val_auc_roc": 0.8207480592801695,
+  "checkpoint": "/mnt/e/EE 5271/FinalProject/checkpoints/efficientnet_b0_last.pt"
+}
+
+=== method2_segmentation ===
+{
+  "epochs": 5,
+  "val_ratio": 0.15,
+  "seed": 42,
+  "device": "cuda",
+  "train_samples": 765,
+  "val_samples": 135,
+  "train_loss_last_epoch": 0.3248076764586704,
+  "train_dice_soft": 0.6361317131668329,
+  "train_iou_0.5": 0.7950136062147376,
+  "val_dice_soft": 0.6328289438696468,
+  "val_iou_0.5": 0.7938253704044554,
+  "checkpoint": "/mnt/e/EE 5271/FinalProject/checkpoints/unet_last.pt"
+}
+
+=== method2_tabular ===
+{
+  "val_ratio": 0.15,
+  "seed": 42,
+  "use_gt_mask": false,
+  "device": "cuda",
+  "train_samples": 765,
+  "val_samples": 135,
+  "lr": {
+    "accuracy": 0.6814814814814815,
+    "sensitivity": 0.5769230769230769,
+    "specificity": 0.7064220183486238,
+    "tn": 77,
+    "fp": 32,
+    "fn": 11,
+    "tp": 15,
+    "auc_roc": 0.6767819336626676,
+    "threshold": 0.5
+  },
+  "xgb": {
+    "accuracy": 0.7851851851851852,
+    "sensitivity": 0.46153846153846156,
+    "specificity": 0.8623853211009175,
+    "tn": 94,
+    "fp": 15,
+    "fn": 14,
+    "tp": 12,
+    "auc_roc": 0.7247706422018348,
+    "threshold": 0.5
+  },
+  "lr_checkpoint": "/mnt/e/EE 5271/FinalProject/checkpoints/method2_lr.joblib",
+  "xgb_checkpoint": "/mnt/e/EE 5271/FinalProject/checkpoints/method2_xgb.json"
+}

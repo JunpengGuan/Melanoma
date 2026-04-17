@@ -1,0 +1,63 @@
+Validation report (UTC 2026-04-10T04:11:48Z)
+val_ratio=0.15 seed=42 threshold=0.5
+
+=== Method 1 (EfficientNet / val split, training CSV) ===
+{
+  "split": "val",
+  "val_samples": 135,
+  "train_samples_in_split_meta": 765,
+  "device": "cuda",
+  "backbone": "efficientnet_b0",
+  "val_ratio": 0.15,
+  "seed": 42,
+  "threshold": 0.5,
+  "accuracy": 0.7481481481481481,
+  "sensitivity": 0.46153846153846156,
+  "specificity": 0.8165137614678899,
+  "tn": 89,
+  "fp": 20,
+  "fn": 14,
+  "tp": 12,
+  "auc_roc": 0.7392378263937897
+}
+
+=== Method 2 — U-Net segmentation (val) ===
+{
+  "val_samples": 135,
+  "dice_soft": 0.8535530497046078,
+  "iou": 0.8192755754347201,
+  "iou_thresh": 0.5,
+  "device": "cuda"
+}
+
+=== Method 2 — ABCD + LR / XGB (val, U-Net masks) ===
+{
+  "split": "val",
+  "val_samples": 135,
+  "train_tabular_samples": 765,
+  "val_ratio": 0.15,
+  "seed": 42,
+  "device": "cuda",
+  "lr": {
+    "accuracy": 0.6814814814814815,
+    "sensitivity": 0.6923076923076923,
+    "specificity": 0.6788990825688074,
+    "tn": 74,
+    "fp": 35,
+    "fn": 8,
+    "tp": 18,
+    "auc_roc": 0.7935779816513763,
+    "threshold": 0.5
+  },
+  "xgb": {
+    "accuracy": 0.725925925925926,
+    "sensitivity": 0.4230769230769231,
+    "specificity": 0.7981651376146789,
+    "tn": 87,
+    "fp": 22,
+    "fn": 15,
+    "tp": 11,
+    "auc_roc": 0.7378263937896965,
+    "threshold": 0.5
+  }
+}
