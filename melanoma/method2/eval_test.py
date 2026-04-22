@@ -1,26 +1,18 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 from typing import Literal
 
 import joblib
 import torch
-import xgboost as xgb
-from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
 
-from melanoma.config import (
-    DEFAULT_METHOD2_LR,
-    DEFAULT_METHOD2_XGB,
-    DEFAULT_TEST_IMAGE_DIR,
-    DEFAULT_TEST_LABEL_CSV,
-    DEFAULT_UNET_CKPT,
-    SEG_IMG_SIZE,
-)
+from melanoma.classification_metrics import binary_metrics
+from melanoma.config import METHOD2_CONFIG_YAML, SEG_IMG_SIZE
 from melanoma.method1.data import load_rows
 from melanoma.method2.abcd import extract_abcd
 from melanoma.method2.infer import load_rgb_hwc_uint8, predict_mask_bool
 from melanoma.method2.unet import build_unet
+from melanoma.yaml_config import load_yaml_section, resolve_path
 
 
 def filter_existing(rows: list[tuple[str, int]], image_dir: Path) -> list[tuple[str, int]]:
@@ -37,8 +29,7 @@ def method2_test_metrics(
     test_image_dir: Path,
     test_label_csv: Path,
     threshold: float,
-) -> dict:
-    """Method 2 on test folder + CSV: U-Net masks + LR or XGB."""
+):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     all_rows = load_rows(test_label_csv)
     rows = filter_existing(all_rows, test_image_dir)
@@ -53,6 +44,10 @@ def method2_test_metrics(
     if classifier == "lr":
         clf = joblib.load(lr_path)
     else:
+        try:
+            import xgboost as xgb
+        except ImportError as exc:
+            raise SystemExit("Need xgboost to evaluate the XGB Method 2 classifier. Run: pip install xgboost") from exc
         clf = xgb.XGBClassifier()
         clf.load_model(str(xgb_path))
 
@@ -66,53 +61,28 @@ def method2_test_metrics(
         probs.append(float(clf.predict_proba(feat)[0, 1]))
         y_true.append(int(y))
 
-    y_pred = [1 if p >= threshold else 0 for p in probs]
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
-    sens = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
-    spec = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
-    auc = (
-        float(roc_auc_score(y_true, probs))
-        if len(set(y_true)) >= 2
-        else float("nan")
-    )
+    metrics = binary_metrics(y_true, probs, threshold)
     return {
         "split": "test",
         "classifier": classifier,
         "samples": len(y_true),
         "skipped_missing_jpg": len(all_rows) - len(rows),
         "device": str(device),
-        "threshold": threshold,
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "sensitivity": sens,
-        "specificity": spec,
-        "tn": int(tn),
-        "fp": int(fp),
-        "fn": int(fn),
-        "tp": int(tp),
-        "auc_roc": auc,
+        **metrics,
     }
 
 
-def main() -> None:
-    p = argparse.ArgumentParser(description="Method 2: evaluate U-Net mask + ABCD + tabular classifier on test CSV.")
-    p.add_argument("--unet-checkpoint", type=Path, default=DEFAULT_UNET_CKPT)
-    p.add_argument("--classifier", choices=("lr", "xgb"), default="lr")
-    p.add_argument("--lr-path", type=Path, default=DEFAULT_METHOD2_LR)
-    p.add_argument("--xgb-path", type=Path, default=DEFAULT_METHOD2_XGB)
-    p.add_argument("--test-image-dir", type=Path, default=DEFAULT_TEST_IMAGE_DIR)
-    p.add_argument("--test-label-csv", type=Path, default=DEFAULT_TEST_LABEL_CSV)
-    p.add_argument("--threshold", type=float, default=0.5)
-    args = p.parse_args()
-
+def main():
+    cfg = load_yaml_section(METHOD2_CONFIG_YAML, "eval_test")
     try:
         m = method2_test_metrics(
-            unet_checkpoint=args.unet_checkpoint,
-            classifier=args.classifier,
-            lr_path=args.lr_path,
-            xgb_path=args.xgb_path,
-            test_image_dir=args.test_image_dir,
-            test_label_csv=args.test_label_csv,
-            threshold=args.threshold,
+            unet_checkpoint=resolve_path(cfg["unet_checkpoint"]),
+            classifier=str(cfg.get("classifier", "lr")),
+            lr_path=resolve_path(cfg["lr_path"]),
+            xgb_path=resolve_path(cfg["xgb_path"]),
+            test_image_dir=resolve_path(cfg["test_image_dir"]),
+            test_label_csv=resolve_path(cfg["test_label_csv"]),
+            threshold=float(cfg.get("threshold", 0.5)),
         )
     except ValueError as e:
         raise SystemExit(str(e)) from e
@@ -121,13 +91,17 @@ def main() -> None:
         f"samples: {m['samples']}  device: {m['device']}  classifier: {m['classifier']}",
     )
     print(f"accuracy @ {m['threshold']}: {m['accuracy']:.4f}")
-    print(f"sensitivity (malignant recall): {m['sensitivity']:.4f}")
+    print(f"balanced accuracy: {m['balanced_accuracy']:.4f}")
+    print(f"sensitivity (melanoma recall): {m['sensitivity']:.4f}")
     print(f"specificity: {m['specificity']:.4f}")
+    print(f"f1: {m['f1']:.4f}")
     print(
         f"confusion_matrix [tn fp; fn tp]:\n  TN={m['tn']} FP={m['fp']}\n  FN={m['fn']} TP={m['tp']}",
     )
     auc = m["auc_roc"]
     print(f"auc_roc: {auc:.4f}" if auc == auc else "auc_roc: n/a (only one class in labels)")
+    auc_pr = m["auc_pr"]
+    print(f"auc_pr: {auc_pr:.4f}" if auc_pr == auc_pr else "auc_pr: n/a (only one class in labels)")
 
 
 if __name__ == "__main__":

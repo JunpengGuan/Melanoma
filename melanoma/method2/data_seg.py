@@ -11,7 +11,15 @@ from melanoma.config import SEG_IMG_SIZE
 
 
 def mask_path_for_id(mask_dir: Path, image_id: str) -> Path:
-    return Path(mask_dir) / f"{image_id}_Segmentation.png"
+    mask_dir = Path(mask_dir)
+    candidates = [
+        mask_dir / f"{image_id}_segmentation.png",
+        mask_dir / f"{image_id}_Segmentation.png",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    return candidates[0]
 
 
 def load_binary_mask(path: Path, out_hw: tuple[int, int]) -> torch.Tensor:

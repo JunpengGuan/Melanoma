@@ -1,23 +1,17 @@
-"""Run Method 1 and Method 2 **test set** (Part3B) metrics and save under ``results/``."""
-
 from __future__ import annotations
 
-import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 from melanoma.config import (
-    DEFAULT_CHECKPOINT,
-    DEFAULT_METHOD2_LR,
-    DEFAULT_METHOD2_XGB,
-    DEFAULT_TEST_IMAGE_DIR,
-    DEFAULT_TEST_LABEL_CSV,
-    DEFAULT_UNET_CKPT,
+    METHOD1_CONFIG_YAML,
+    METHOD2_CONFIG_YAML,
     PROJECT_ROOT,
 )
 from melanoma.method1.eval_test import method1_test_metrics
 from melanoma.method2.eval_test import method2_test_metrics
+from melanoma.yaml_config import load_yaml_section, resolve_path
 
 
 def _sanitize(obj: object) -> object:
@@ -31,68 +25,65 @@ def _sanitize(obj: object) -> object:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Save Part3B test metrics for Method 1 & 2 to results/.")
-    p.add_argument("--out-dir", type=Path, default=PROJECT_ROOT / "results")
-    p.add_argument("--threshold", type=float, default=0.5)
-    p.add_argument("--checkpoint-m1", type=Path, default=DEFAULT_CHECKPOINT)
-    p.add_argument("--test-image-dir", type=Path, default=DEFAULT_TEST_IMAGE_DIR)
-    p.add_argument("--test-label-csv", type=Path, default=DEFAULT_TEST_LABEL_CSV)
-    p.add_argument("--unet-checkpoint", type=Path, default=DEFAULT_UNET_CKPT)
-    p.add_argument("--lr-path", type=Path, default=DEFAULT_METHOD2_LR)
-    p.add_argument("--xgb-path", type=Path, default=DEFAULT_METHOD2_XGB)
-    p.add_argument("--batch-size", type=int, default=32)
-    p.add_argument("--num-workers", type=int, default=2)
-    args = p.parse_args()
-
-    out_dir = args.out_dir
+    m1_cfg = load_yaml_section(METHOD1_CONFIG_YAML, "eval_test")
+    m2_cfg = load_yaml_section(METHOD2_CONFIG_YAML, "eval_test")
+    out_dir = PROJECT_ROOT / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     report: dict = {
         "generated_at_utc": ts,
-        "threshold": args.threshold,
-        "test_image_dir": str(args.test_image_dir),
-        "test_label_csv": str(args.test_label_csv),
+        "method1_config_yaml": str(METHOD1_CONFIG_YAML),
+        "method2_config_yaml": str(METHOD2_CONFIG_YAML),
+        "method1_threshold": float(m1_cfg.get("threshold", 0.5)),
+        "method2_threshold": float(m2_cfg.get("threshold", 0.5)),
+        "method1_test_image_dir": str(resolve_path(m1_cfg["image_dir"])),
+        "method1_test_label_csv": str(resolve_path(m1_cfg["label_csv"])),
+        "method2_test_image_dir": str(resolve_path(m2_cfg["test_image_dir"])),
+        "method2_test_label_csv": str(resolve_path(m2_cfg["test_label_csv"])),
     }
 
     m1 = method1_test_metrics(
-        checkpoint=args.checkpoint_m1,
-        image_dir=args.test_image_dir,
-        label_csv=args.test_label_csv,
-        backbone=None,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        threshold=args.threshold,
+        checkpoint=resolve_path(m1_cfg["checkpoint"]),
+        image_dir=resolve_path(m1_cfg["image_dir"]),
+        label_csv=resolve_path(m1_cfg["label_csv"]),
+        backbone=m1_cfg.get("backbone"),
+        batch_size=int(m1_cfg.get("batch_size", 32)),
+        num_workers=int(m1_cfg.get("num_workers", 2)),
+        threshold=float(m1_cfg.get("threshold", 0.5)),
     )
     report["method1"] = m1
 
     m2_lr = method2_test_metrics(
-        unet_checkpoint=args.unet_checkpoint,
+        unet_checkpoint=resolve_path(m2_cfg["unet_checkpoint"]),
         classifier="lr",
-        lr_path=args.lr_path,
-        xgb_path=args.xgb_path,
-        test_image_dir=args.test_image_dir,
-        test_label_csv=args.test_label_csv,
-        threshold=args.threshold,
+        lr_path=resolve_path(m2_cfg["lr_path"]),
+        xgb_path=resolve_path(m2_cfg["xgb_path"]),
+        test_image_dir=resolve_path(m2_cfg["test_image_dir"]),
+        test_label_csv=resolve_path(m2_cfg["test_label_csv"]),
+        threshold=float(m2_cfg.get("threshold", 0.5)),
     )
     report["method2_lr"] = m2_lr
 
     m2_xgb = method2_test_metrics(
-        unet_checkpoint=args.unet_checkpoint,
+        unet_checkpoint=resolve_path(m2_cfg["unet_checkpoint"]),
         classifier="xgb",
-        lr_path=args.lr_path,
-        xgb_path=args.xgb_path,
-        test_image_dir=args.test_image_dir,
-        test_label_csv=args.test_label_csv,
-        threshold=args.threshold,
+        lr_path=resolve_path(m2_cfg["lr_path"]),
+        xgb_path=resolve_path(m2_cfg["xgb_path"]),
+        test_image_dir=resolve_path(m2_cfg["test_image_dir"]),
+        test_label_csv=resolve_path(m2_cfg["test_label_csv"]),
+        threshold=float(m2_cfg.get("threshold", 0.5)),
     )
     report["method2_xgb"] = m2_xgb
 
     lines = [
-        f"Test set report (UTC {ts})  Part3B",
-        f"threshold={args.threshold}",
-        f"images: {args.test_image_dir}",
-        f"labels: {args.test_label_csv}",
+        f"Test set report (UTC {ts})  ISIC2017 Test",
+        f"method1 threshold={m1_cfg.get('threshold', 0.5)}",
+        f"method2 threshold={m2_cfg.get('threshold', 0.5)}",
+        f"method1 images: {resolve_path(m1_cfg['image_dir'])}",
+        f"method1 labels: {resolve_path(m1_cfg['label_csv'])}",
+        f"method2 images: {resolve_path(m2_cfg['test_image_dir'])}",
+        f"method2 labels: {resolve_path(m2_cfg['test_label_csv'])}",
         "",
         "=== Method 1 ===",
         json.dumps(m1, indent=2),

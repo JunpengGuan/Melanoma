@@ -1,31 +1,92 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 
 import joblib
 import numpy as np
 import torch
-import xgboost as xgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from melanoma.classification_metrics import binary_metrics, threshold_sweep_summary
 from melanoma.config import (
-    DEFAULT_IMAGE_DIR,
-    DEFAULT_LABEL_CSV,
-    DEFAULT_SEG_MASK_DIR,
-    DEFAULT_METHOD2_LR,
-    DEFAULT_METHOD2_XGB,
-    DEFAULT_UNET_CKPT,
+    METHOD2_CONFIG_YAML,
     SEG_IMG_SIZE,
 )
 from melanoma.method1.data import load_rows, stratified_split
-from melanoma.method2.abcd import extract_abcd
+from melanoma.method2.abcd import FEATURE_NAMES, extract_abcd
 from melanoma.method2.data_seg import filter_rows_with_masks, load_binary_mask, mask_path_for_id
 from melanoma.method2.infer import load_rgb_hwc_uint8, predict_mask_bool
 from melanoma.method2.unet import build_unet
 from melanoma.train_report import merge_train_report
+from melanoma.yaml_config import load_yaml_section, resolve_path
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train Method 2 ABCD tabular classifiers.")
+    parser.add_argument(
+        "--mask-source",
+        choices=["pred", "gt"],
+        default=None,
+        help="Override train_tabular.use_gt_mask: pred=U-Net masks, gt=ground-truth masks.",
+    )
+    parser.add_argument(
+        "--feature-set",
+        default=None,
+        help="ABCD feature subset, e.g. A, B, C, D, AB, ABC, ABCD. Default: ABCD.",
+    )
+    parser.add_argument("--tag", default=None, help="Run tag used in checkpoint/result filenames.")
+    parser.add_argument("--report-section", default=None, help="Section name in results/train_report.*")
+    parser.add_argument("--lr-out", default=None, help="Output path for Logistic Regression checkpoint.")
+    parser.add_argument("--xgb-out", default=None, help="Output path for XGBoost checkpoint.")
+    parser.add_argument("--feature-table-out", default=None, help="Output CSV path for train features.")
+    parser.add_argument("--val-feature-table-out", default=None, help="Output CSV path for val features.")
+    parser.add_argument("--val-predictions-out", default=None, help="Output CSV path for val probabilities.")
+    parser.add_argument("--val-threshold", type=float, default=None, help="Fixed threshold for reported metrics.")
+    return parser.parse_args(argv)
+
+
+def _feature_indices(feature_set: str) -> tuple[list[int], list[str], str]:
+    spec = str(feature_set or "ABCD").upper().replace("+", "")
+    if spec == "ALL":
+        spec = "ABCD"
+    allowed = set("ABCD")
+    requested = set(spec)
+    if not spec or requested - allowed:
+        raise SystemExit(
+            f"Unsupported feature set '{feature_set}'. Use combinations of A/B/C/D, e.g. A, BC, ABCD.",
+        )
+    ordered = "".join(ch for ch in "ABCD" if ch in requested)
+    idx = [i for i, name in enumerate(FEATURE_NAMES) if len(name) > 1 and name[1] == "_" and name[0] in requested]
+    names = [FEATURE_NAMES[i] for i in idx]
+    if not idx:
+        raise SystemExit(f"Feature set '{feature_set}' selected no features.")
+    return idx, names, ordered
+
+
+def _apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
+    cfg = dict(cfg)
+    if args.mask_source is not None:
+        cfg["use_gt_mask"] = args.mask_source == "gt"
+    for arg_name, cfg_name in [
+        ("feature_set", "feature_set"),
+        ("tag", "tag"),
+        ("report_section", "report_section"),
+        ("lr_out", "lr_out"),
+        ("xgb_out", "xgb_out"),
+        ("feature_table_out", "feature_table_out"),
+        ("val_feature_table_out", "val_feature_table_out"),
+        ("val_predictions_out", "val_predictions_out"),
+    ]:
+        value = getattr(args, arg_name)
+        if value is not None:
+            cfg[cfg_name] = value
+    if args.val_threshold is not None:
+        cfg["val_threshold"] = args.val_threshold
+    return cfg
 
 
 def gt_mask_bool(mask_dir: Path, image_id: str, size: int) -> np.ndarray:
@@ -34,75 +95,125 @@ def gt_mask_bool(mask_dir: Path, image_id: str, size: int) -> np.ndarray:
     return t.squeeze(0).numpy().astype(bool)
 
 
-def _cls_metrics(y_true: list[int], probs: list[float], threshold: float) -> dict:
-    from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score
+def _model_report(y_true: list[int], probs: list[float], threshold: float) -> dict:
+    fixed = binary_metrics(y_true, probs, threshold)
+    fixed["threshold_sweep"] = threshold_sweep_summary(y_true, probs)
+    return fixed
 
-    y_pred = [1 if p >= threshold else 0 for p in probs]
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
-    sens = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
-    spec = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
-    auc = (
-        float(roc_auc_score(y_true, probs))
-        if len(set(y_true)) >= 2
-        else float("nan")
+
+def _write_feature_table(
+    path,
+    image_ids,
+    X,
+    y,
+    feature_names,
+):
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["image_id", *feature_names, "label"])
+        for image_id, feats, label in zip(image_ids, X, y, strict=True):
+            writer.writerow([image_id, *[float(v) for v in feats], int(label)])
+    print(f"saved {path}")
+
+
+def _write_prediction_table(
+    path,
+    image_ids,
+    y,
+    probs_lr,
+    probs_xgb,
+):
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["image_id", "label", "lr_prob", "xgb_prob"])
+        for row in zip(image_ids, y, probs_lr, probs_xgb, strict=True):
+            image_id, label, lr_prob, xgb_prob = row
+            writer.writerow([image_id, int(label), float(lr_prob), float(xgb_prob)])
+    print(f"saved {path}")
+
+
+def main(argv: list[str] | None = None):
+    args = _parse_args(argv)
+    cfg = load_yaml_section(METHOD2_CONFIG_YAML, "train_tabular")
+    cfg = _apply_cli_overrides(cfg, args)
+    image_dir = resolve_path(cfg["image_dir"])
+    label_csv = resolve_path(cfg["label_csv"])
+    mask_dir = resolve_path(cfg["mask_dir"])
+    val_image_dir = resolve_path(cfg.get("val_image_dir"))
+    val_label_csv = resolve_path(cfg.get("val_label_csv"))
+    val_mask_dir = resolve_path(cfg.get("val_mask_dir"))
+    unet_checkpoint = resolve_path(cfg["unet_checkpoint"])
+    use_gt_mask = bool(cfg.get("use_gt_mask", False))
+    val_ratio = float(cfg.get("val_ratio", 0.15))
+    seed = int(cfg.get("seed", 42))
+    val_threshold = float(cfg.get("val_threshold", 0.5))
+    mask_tag = "gt_mask" if use_gt_mask else "pred_mask"
+    feature_idx, feature_names, feature_set = _feature_indices(str(cfg.get("feature_set") or "ABCD"))
+    run_tag = str(cfg.get("tag") or (mask_tag if feature_set == "ABCD" else f"{mask_tag}_{feature_set.lower()}"))
+    lr_out = resolve_path(cfg.get("lr_out") or f"checkpoints/method2_{run_tag}_lr.joblib")
+    xgb_out = resolve_path(cfg.get("xgb_out") or f"checkpoints/method2_{run_tag}_xgb.json")
+    feature_table_out = resolve_path(
+        cfg.get("feature_table_out") or f"results/method2_{run_tag}_train_features.csv",
     )
-    return {
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "sensitivity": sens,
-        "specificity": spec,
-        "tn": int(tn),
-        "fp": int(fp),
-        "fn": int(fn),
-        "tp": int(tp),
-        "auc_roc": auc,
-        "threshold": threshold,
-    }
-
-
-def main() -> None:
-    p = argparse.ArgumentParser(description="Method 2 stage 3: train LR / XGBoost on ABCD features.")
-    p.add_argument("--image-dir", type=Path, default=DEFAULT_IMAGE_DIR)
-    p.add_argument("--label-csv", type=Path, default=DEFAULT_LABEL_CSV)
-    p.add_argument("--mask-dir", type=Path, default=DEFAULT_SEG_MASK_DIR)
-    p.add_argument("--unet-checkpoint", type=Path, default=DEFAULT_UNET_CKPT)
-    p.add_argument("--use-gt-mask", action="store_true", help="Use GT masks (upper bound); ignore U-Net.")
-    p.add_argument("--val-ratio", type=float, default=0.15)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--lr-out", type=Path, default=DEFAULT_METHOD2_LR)
-    p.add_argument("--xgb-out", type=Path, default=DEFAULT_METHOD2_XGB)
-    p.add_argument("--val-threshold", type=float, default=0.5)
-    args = p.parse_args()
+    val_feature_table_out = resolve_path(
+        cfg.get("val_feature_table_out") or f"results/method2_{run_tag}_val_features.csv",
+    )
+    val_predictions_out = resolve_path(
+        cfg.get("val_predictions_out") or f"results/method2_{run_tag}_val_predictions.csv",
+    )
+    report_section = cfg.get("report_section")
+    if not report_section:
+        report_section = f"method2_tabular_{run_tag}"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    rows = load_rows(args.label_csv)
-    rows = filter_rows_with_masks(rows, args.image_dir, args.mask_dir)
-    train_idx, val_idx = stratified_split(rows, val_ratio=args.val_ratio, seed=args.seed)
+    train_rows = load_rows(label_csv)
+    train_rows = filter_rows_with_masks(train_rows, image_dir, mask_dir)
+    if val_image_dir is not None and val_label_csv is not None and val_mask_dir is not None:
+        val_rows = load_rows(val_label_csv)
+        val_rows = filter_rows_with_masks(val_rows, val_image_dir, val_mask_dir)
+        train_idx = list(range(len(train_rows)))
+        val_idx = list(range(len(val_rows)))
+    else:
+        train_idx, val_idx = stratified_split(train_rows, val_ratio=val_ratio, seed=seed)
+        val_rows = train_rows
+        val_image_dir = image_dir
+        val_mask_dir = mask_dir
 
     unet = None
-    if not args.use_gt_mask:
-        if not args.unet_checkpoint.is_file():
-            raise SystemExit(f"Missing U-Net checkpoint {args.unet_checkpoint}; train with train_seg.py first.")
+    if not use_gt_mask:
+        if not unet_checkpoint.is_file():
+            raise SystemExit(f"Missing U-Net checkpoint {unet_checkpoint}; train with train_seg.py first.")
         unet = build_unet().to(device)
-        ck = torch.load(args.unet_checkpoint, map_location=device, weights_only=False)
+        ck = torch.load(unet_checkpoint, map_location=device, weights_only=False)
         unet.load_state_dict(ck["model"], strict=True)
         unet.eval()
 
     X_list: list[np.ndarray] = []
     y_list: list[int] = []
+    train_image_ids: list[str] = []
     for i in train_idx:
-        image_id, y = rows[i]
-        img_path = args.image_dir / f"{image_id}.jpg"
+        image_id, y = train_rows[i]
+        img_path = image_dir / f"{image_id}.jpg"
         rgb = load_rgb_hwc_uint8(img_path, SEG_IMG_SIZE)
-        if args.use_gt_mask:
-            mbool = gt_mask_bool(args.mask_dir, image_id, SEG_IMG_SIZE)
+        if use_gt_mask:
+            mbool = gt_mask_bool(mask_dir, image_id, SEG_IMG_SIZE)
         else:
             mbool = predict_mask_bool(unet, img_path, device, SEG_IMG_SIZE)
         feat = extract_abcd(rgb, mbool)
         X_list.append(feat)
         y_list.append(y)
+        train_image_ids.append(image_id)
 
-    X = np.stack(X_list, axis=0)
+    X_all = np.stack(X_list, axis=0)
+    X = X_all[:, feature_idx]
     y = np.array(y_list, dtype=np.int64)
+    _write_feature_table(feature_table_out, train_image_ids, X, y_list, feature_names)
     n_pos = max(1, int(y.sum()))
     n_neg = max(1, int(len(y) - y.sum()))
 
@@ -120,9 +231,14 @@ def main() -> None:
         ]
     )
     pipe.fit(X, y)
-    args.lr_out.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(pipe, args.lr_out)
-    print(f"saved {args.lr_out}")
+    lr_out.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipe, lr_out)
+    print(f"saved {lr_out}")
+
+    try:
+        import xgboost as xgb
+    except ImportError as exc:
+        raise SystemExit("Need xgboost for Method 2 tabular training. Run: pip install xgboost") from exc
 
     clf_xgb = xgb.XGBClassifier(
         n_estimators=200,
@@ -133,43 +249,63 @@ def main() -> None:
         reg_lambda=1.0,
         objective="binary:logistic",
         eval_metric="auc",
-        random_state=args.seed,
+        random_state=seed,
         scale_pos_weight=n_neg / n_pos,
     )
     clf_xgb.fit(X, y)
-    clf_xgb.save_model(str(args.xgb_out))
-    print(f"saved {args.xgb_out}")
+    clf_xgb.save_model(str(xgb_out))
+    print(f"saved {xgb_out}")
 
     probs_lr: list[float] = []
     probs_xgb: list[float] = []
     y_val: list[int] = []
+    val_image_ids: list[str] = []
+    X_val_list: list[np.ndarray] = []
     for i in val_idx:
-        image_id, y = rows[i]
-        img_path = args.image_dir / f"{image_id}.jpg"
+        image_id, y = val_rows[i]
+        img_path = val_image_dir / f"{image_id}.jpg"
         rgb = load_rgb_hwc_uint8(img_path, SEG_IMG_SIZE)
-        if args.use_gt_mask:
-            mbool = gt_mask_bool(args.mask_dir, image_id, SEG_IMG_SIZE)
+        if use_gt_mask:
+            mbool = gt_mask_bool(val_mask_dir, image_id, SEG_IMG_SIZE)
         else:
             mbool = predict_mask_bool(unet, img_path, device, SEG_IMG_SIZE)
-        feat = extract_abcd(rgb, mbool).reshape(1, -1)
+        feat_all = extract_abcd(rgb, mbool)
+        feat = feat_all[feature_idx]
+        X_val_list.append(feat)
+        feat = feat.reshape(1, -1)
         probs_lr.append(float(pipe.predict_proba(feat)[0, 1]))
         probs_xgb.append(float(clf_xgb.predict_proba(feat)[0, 1]))
         y_val.append(int(y))
+        val_image_ids.append(image_id)
 
-    thr = args.val_threshold
+    X_val = np.stack(X_val_list, axis=0)
+    _write_feature_table(val_feature_table_out, val_image_ids, X_val, y_val, feature_names)
+    _write_prediction_table(val_predictions_out, val_image_ids, y_val, probs_lr, probs_xgb)
+
+    thr = val_threshold
     merge_train_report(
-        "method2_tabular",
+        str(report_section),
         {
-            "val_ratio": args.val_ratio,
-            "seed": args.seed,
-            "use_gt_mask": args.use_gt_mask,
+            "config_yaml": str(METHOD2_CONFIG_YAML),
+            "val_ratio": val_ratio,
+            "seed": seed,
+            "use_gt_mask": use_gt_mask,
+            "mask_source": "ground_truth" if use_gt_mask else "unet_prediction",
+            "feature_set": feature_set,
+            "run_tag": run_tag,
             "device": str(device),
             "train_samples": len(train_idx),
             "val_samples": len(y_val),
-            "lr": _cls_metrics(y_val, probs_lr, thr),
-            "xgb": _cls_metrics(y_val, probs_xgb, thr),
-            "lr_checkpoint": str(args.lr_out),
-            "xgb_checkpoint": str(args.xgb_out),
+            "train_image_dir": str(image_dir),
+            "val_image_dir": str(val_image_dir),
+            "feature_names": feature_names,
+            "lr": _model_report(y_val, probs_lr, thr),
+            "xgb": _model_report(y_val, probs_xgb, thr),
+            "lr_checkpoint": str(lr_out),
+            "xgb_checkpoint": str(xgb_out),
+            "feature_table": str(feature_table_out) if feature_table_out else None,
+            "val_feature_table": str(val_feature_table_out) if val_feature_table_out else None,
+            "val_predictions": str(val_predictions_out) if val_predictions_out else None,
         },
     )
 
