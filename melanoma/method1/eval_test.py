@@ -127,7 +127,7 @@ def main() -> None:
         "--label-csv",
         type=Path,
         default=DEFAULT_TEST_LABEL_CSV,
-        help=f"default: {DEFAULT_TEST_LABEL_CSV} (benign/malignant or 0/1)",
+        help=f"default: {DEFAULT_TEST_LABEL_CSV} (benign/melanoma or 0/1)",
     )
     p.add_argument("--backbone", type=str, default=None, help="Override backbone if missing from checkpoint")
     p.add_argument("--batch-size", type=int, default=32)
@@ -164,7 +164,7 @@ def main() -> None:
 
     print(f"samples: {m['samples']}  device: {m['device']}  backbone: {m['backbone']}")
     print(f"accuracy @ {m['threshold']}: {m['accuracy']:.4f}")
-    print(f"sensitivity (malignant recall): {m['sensitivity']:.4f}")
+    print(f"sensitivity (melanoma recall): {m['sensitivity']:.4f}")
     print(f"specificity: {m['specificity']:.4f}")
     print(
         f"confusion_matrix [tn fp; fn tp]:\n  TN={m['tn']} FP={m['fp']}\n  FN={m['fn']} TP={m['tp']}",
