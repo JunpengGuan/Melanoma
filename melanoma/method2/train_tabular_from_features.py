@@ -21,7 +21,7 @@ from melanoma.yaml_config import resolve_path
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="train Method 2 tabular classifiers from cached ABCD feature CSVs",
+        description="Train Method 2 tabular classifiers from cached ABCD feature CSVs.",
     )
     parser.add_argument("--train-feature-table", required=True)
     parser.add_argument("--val-feature-table", required=True)
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         import xgboost as xgb
     except ImportError as exc:
-        raise SystemExit("Need xgboost for Method 2 tabular training") from exc
+        raise SystemExit("Need xgboost for Method 2 tabular training. Run: pip install xgboost") from exc
 
     clf_xgb = xgb.XGBClassifier(
         n_estimators=200,

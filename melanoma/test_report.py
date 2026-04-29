@@ -37,6 +37,7 @@ def main() -> None:
         "method2_config_yaml": str(METHOD2_CONFIG_YAML),
         "method1_threshold": float(m1_cfg.get("threshold", 0.5)),
         "method2_threshold": float(m2_cfg.get("threshold", 0.5)),
+        "method2_feature_set": str(m2_cfg.get("feature_set") or "ABCD"),
         "method1_test_image_dir": str(resolve_path(m1_cfg["image_dir"])),
         "method1_test_label_csv": str(resolve_path(m1_cfg["label_csv"])),
         "method2_test_image_dir": str(resolve_path(m2_cfg["test_image_dir"])),
@@ -62,6 +63,7 @@ def main() -> None:
         test_image_dir=resolve_path(m2_cfg["test_image_dir"]),
         test_label_csv=resolve_path(m2_cfg["test_label_csv"]),
         threshold=float(m2_cfg.get("threshold", 0.5)),
+        feature_set=str(m2_cfg.get("feature_set") or "ABCD"),
     )
     report["method2_lr"] = m2_lr
 
@@ -73,6 +75,7 @@ def main() -> None:
         test_image_dir=resolve_path(m2_cfg["test_image_dir"]),
         test_label_csv=resolve_path(m2_cfg["test_label_csv"]),
         threshold=float(m2_cfg.get("threshold", 0.5)),
+        feature_set=str(m2_cfg.get("feature_set") or "ABCD"),
     )
     report["method2_xgb"] = m2_xgb
 
@@ -80,6 +83,7 @@ def main() -> None:
         f"Test set report (UTC {ts})  ISIC2017 Test",
         f"method1 threshold={m1_cfg.get('threshold', 0.5)}",
         f"method2 threshold={m2_cfg.get('threshold', 0.5)}",
+        f"method2 feature_set={m2_cfg.get('feature_set', 'ABCD')}",
         f"method1 images: {resolve_path(m1_cfg['image_dir'])}",
         f"method1 labels: {resolve_path(m1_cfg['label_csv'])}",
         f"method2 images: {resolve_path(m2_cfg['test_image_dir'])}",

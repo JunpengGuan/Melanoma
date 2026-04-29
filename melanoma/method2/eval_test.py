@@ -29,7 +29,8 @@ def method2_test_metrics(
     test_image_dir: Path,
     test_label_csv: Path,
     threshold: float,
-):
+) -> dict:
+    """Method 2 on test folder + CSV: U-Net masks + LR or XGB."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     all_rows = load_rows(test_label_csv)
     rows = filter_existing(all_rows, test_image_dir)
@@ -72,7 +73,7 @@ def method2_test_metrics(
     }
 
 
-def main():
+def main() -> None:
     cfg = load_yaml_section(METHOD2_CONFIG_YAML, "eval_test")
     try:
         m = method2_test_metrics(

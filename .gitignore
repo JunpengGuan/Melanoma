@@ -23,6 +23,7 @@ Thumbs.db
 checkpoints/*.pt
 checkpoints/*.joblib
 checkpoints/*.json
+checkpoints/ablations/
 
 # Local ISIC / ISBI image data (download separately; see README)
 ISBI2016_ISIC_Part*/
@@ -33,3 +34,8 @@ ISBI2016_ISIC_Part*/
 # Metrics reports (regenerate: train_*.py, test_report.py)
 results/*.txt
 results/*.json
+results/*.csv
+results/ablations/
+
+# Cluster logs
+logs/

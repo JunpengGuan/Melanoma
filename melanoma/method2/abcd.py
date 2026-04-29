@@ -72,7 +72,7 @@ def _clean_mask(mask_bool_hw):
     return labeled == keep
 
 
-def _principal_axis_angle_deg(mask_bool_hw):
+def _principal_axis_angle_deg(mask_bool_hw: np.ndarray):
     rr, cc = np.where(mask_bool_hw)
     coords = np.column_stack([cc.astype(np.float32), rr.astype(np.float32)])
     centroid = coords.mean(axis=0, keepdims=True)
@@ -83,7 +83,7 @@ def _principal_axis_angle_deg(mask_bool_hw):
     return float(np.degrees(np.arctan2(major_vec[1], major_vec[0])))
 
 
-def _crop_centered_square(mask_bool_hw, side):
+def _crop_centered_square(mask_bool_hw: np.ndarray, side: int):
     rr, cc = np.where(mask_bool_hw)
     center_r = float(rr.mean())
     center_c = float(cc.mean())
@@ -107,14 +107,14 @@ def _crop_centered_square(mask_bool_hw, side):
     return out
 
 
-def _iou(a, b):
+def _iou(a: np.ndarray, b: np.ndarray):
     inter = float(np.logical_and(a, b).sum())
     union = float(np.logical_or(a, b).sum())
     if union <= 0.0:
         return 1.0
     return inter / union
 
-def _axis_asymmetry(mask_bool_hw):
+def _axis_asymmetry(mask_bool_hw: np.ndarray):
     if mask_bool_hw.sum() < 10:
         return 0.0, 0.0
 
@@ -150,7 +150,7 @@ def _axis_asymmetry(mask_bool_hw):
     return float(1.0 - major_iou), float(1.0 - minor_iou)
 
 
-def _entropy(values, bins):
+def _entropy(values: np.ndarray, bins: int = 16):
     if values.size == 0:
         return 0.0
     hist, _ = np.histogram(values, bins=bins, range=(0.0, 1.0))
@@ -162,7 +162,8 @@ def _entropy(values, bins):
     return float(-(probs * np.log(probs)).sum())
 
 
-def _hue_circular_std(h_vals):
+def _hue_circular_std(h_vals: np.ndarray) -> float:
+    """Circular std for hue in [0, 1], returned in hue-cycle units."""
     if h_vals.size == 0:
         return 0.0
     angles = 2.0 * np.pi * h_vals.astype(np.float64)
@@ -173,13 +174,13 @@ def _hue_circular_std(h_vals):
     return float(np.sqrt(-2.0 * np.log(resultant)) / (2.0 * np.pi))
 
 
-def _p95_p05(values):
+def _p95_p05(values: np.ndarray) -> float:
     if values.size == 0:
         return 0.0
     return float(np.percentile(values, 95) - np.percentile(values, 5))
 
 
-def _region_axis_length(prop, new_name: str, old_name: str):
+def _region_axis_length(prop: object, new_name: str, old_name: str):
     value = getattr(prop, new_name, None)
     if value is None:
         value = getattr(prop, old_name, 0.0)
@@ -187,6 +188,11 @@ def _region_axis_length(prop, new_name: str, old_name: str):
 
 
 def extract_abcd(image_uint8_hwc: np.ndarray, mask_bool_hw: np.ndarray) -> np.ndarray:
+    """Extract ABCD-guided features from RGB image + lesion mask.
+
+    A/B/D come from the cleaned mask. C comes from HSV statistics inside the lesion region.
+    All diameter-like features are pixel-space proxies unless physical calibration is provided.
+    """
     if image_uint8_hwc.ndim != 3 or image_uint8_hwc.shape[2] < 3:
         raise ValueError("image must be HxWx3")
 

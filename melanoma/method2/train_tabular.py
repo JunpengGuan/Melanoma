@@ -25,6 +25,14 @@ from melanoma.train_report import merge_train_report
 from melanoma.yaml_config import load_yaml_section, resolve_path
 
 
+def _filter_rows_with_images(rows: list[tuple[str, int]], image_dir: Path) -> list[tuple[str, int]]:
+    out: list[tuple[str, int]] = []
+    for image_id, y in rows:
+        if (image_dir / f"{image_id}.jpg").is_file():
+            out.append((image_id, y))
+    return out
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Method 2 ABCD tabular classifiers.")
     parser.add_argument(
@@ -46,6 +54,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--val-feature-table-out", default=None, help="Output CSV path for val features.")
     parser.add_argument("--val-predictions-out", default=None, help="Output CSV path for val probabilities.")
     parser.add_argument("--val-threshold", type=float, default=None, help="Fixed threshold for reported metrics.")
+    parser.add_argument("--image-dir", default=None, help="Override shared.image_dir.")
+    parser.add_argument("--label-csv", default=None, help="Override shared.label_csv.")
+    parser.add_argument("--mask-dir", default=None, help="Override shared.mask_dir.")
+    parser.add_argument("--val-image-dir", default=None, help="Override shared.val_image_dir.")
+    parser.add_argument("--val-label-csv", default=None, help="Override shared.val_label_csv.")
+    parser.add_argument("--val-mask-dir", default=None, help="Override shared.val_mask_dir.")
+    parser.add_argument("--unet-checkpoint", default=None, help="Override shared.unet_checkpoint.")
+    parser.add_argument("--val-ratio", type=float, default=None, help="Override shared.val_ratio.")
+    parser.add_argument("--seed", type=int, default=None, help="Override shared.seed.")
     return parser.parse_args(argv)
 
 
@@ -80,12 +97,23 @@ def _apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
         ("feature_table_out", "feature_table_out"),
         ("val_feature_table_out", "val_feature_table_out"),
         ("val_predictions_out", "val_predictions_out"),
+        ("image_dir", "image_dir"),
+        ("label_csv", "label_csv"),
+        ("mask_dir", "mask_dir"),
+        ("val_image_dir", "val_image_dir"),
+        ("val_label_csv", "val_label_csv"),
+        ("val_mask_dir", "val_mask_dir"),
+        ("unet_checkpoint", "unet_checkpoint"),
     ]:
         value = getattr(args, arg_name)
         if value is not None:
             cfg[cfg_name] = value
     if args.val_threshold is not None:
         cfg["val_threshold"] = args.val_threshold
+    if args.val_ratio is not None:
+        cfg["val_ratio"] = args.val_ratio
+    if args.seed is not None:
+        cfg["seed"] = args.seed
     return cfg
 
 
@@ -173,10 +201,21 @@ def main(argv: list[str] | None = None):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_rows = load_rows(label_csv)
-    train_rows = filter_rows_with_masks(train_rows, image_dir, mask_dir)
-    if val_image_dir is not None and val_label_csv is not None and val_mask_dir is not None:
+    if use_gt_mask:
+        train_rows = filter_rows_with_masks(train_rows, image_dir, mask_dir)
+    else:
+        train_rows = _filter_rows_with_images(train_rows, image_dir)
+    has_external_val = (
+        val_image_dir is not None
+        and val_label_csv is not None
+        and (not use_gt_mask or val_mask_dir is not None)
+    )
+    if has_external_val:
         val_rows = load_rows(val_label_csv)
-        val_rows = filter_rows_with_masks(val_rows, val_image_dir, val_mask_dir)
+        if use_gt_mask:
+            val_rows = filter_rows_with_masks(val_rows, val_image_dir, val_mask_dir)
+        else:
+            val_rows = _filter_rows_with_images(val_rows, val_image_dir)
         train_idx = list(range(len(train_rows)))
         val_idx = list(range(len(val_rows)))
     else:

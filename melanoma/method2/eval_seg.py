@@ -63,7 +63,8 @@ def segmentation_dataset_metrics(
     batch_size: int = 8,
     num_workers: int = 2,
     iou_thresh: float = 0.5,
-):
+) -> dict:
+    """Evaluate segmentation on every row in an explicit image/mask split."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     rows = load_rows(label_csv)
     rows = filter_rows_with_masks(rows, image_dir, mask_dir)
@@ -91,7 +92,7 @@ def segmentation_dataset_metrics(
     }
 
 
-def main():
+def main() -> None:
     cfg = load_yaml_section(METHOD2_CONFIG_YAML, "eval_seg")
     output_path = resolve_path(cfg.get("output"))
     val_image_dir = resolve_path(cfg.get("val_image_dir"))
