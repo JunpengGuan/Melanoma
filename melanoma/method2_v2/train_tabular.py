@@ -17,10 +17,10 @@ from melanoma.config import (
     SEG_IMG_SIZE,
 )
 from melanoma.method1.data import load_rows, stratified_split
-from melanoma.method2.abcd import FEATURE_NAMES, extract_abcd
-from melanoma.method2.data_seg import filter_rows_with_masks, load_binary_mask, mask_path_for_id
-from melanoma.method2.infer import load_rgb_hwc_uint8, predict_mask_bool
-from melanoma.method2.unet import build_unet
+from melanoma.method2_v2.abcd import FEATURE_NAMES, extract_abcd
+from melanoma.method2_v2.data_seg import filter_rows_with_masks, load_binary_mask, mask_path_for_id
+from melanoma.method2_v2.infer import load_rgb_hwc_uint8, predict_mask_bool
+from melanoma.method2_v2.unet import build_unet
 from melanoma.train_report import merge_train_report
 from melanoma.yaml_config import load_yaml_section, resolve_path
 

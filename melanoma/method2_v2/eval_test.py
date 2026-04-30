@@ -9,9 +9,9 @@ import torch
 from melanoma.classification_metrics import binary_metrics
 from melanoma.config import METHOD2_CONFIG_YAML, SEG_IMG_SIZE
 from melanoma.method1.data import load_rows
-from melanoma.method2.abcd import extract_abcd
-from melanoma.method2.infer import load_rgb_hwc_uint8, predict_mask_bool
-from melanoma.method2.unet import build_unet
+from melanoma.method2_v2.abcd import extract_abcd
+from melanoma.method2_v2.infer import load_rgb_hwc_uint8, predict_mask_bool
+from melanoma.method2_v2.unet import build_unet
 from melanoma.yaml_config import load_yaml_section, resolve_path
 
 

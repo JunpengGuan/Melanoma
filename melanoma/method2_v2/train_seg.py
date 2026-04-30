@@ -5,10 +5,10 @@ from torch.utils.data import DataLoader, Subset
 
 from melanoma.config import METHOD2_CONFIG_YAML
 from melanoma.method1.data import load_rows, stratified_split
-from melanoma.method2.data_seg import LesionSegDataset, filter_rows_with_masks
-from melanoma.method2.losses import SegmentationLoss
-from melanoma.method2.seg_metrics import mean_dice_soft, mean_iou_binary
-from melanoma.method2.unet import build_unet
+from melanoma.method2_v2.data_seg import LesionSegDataset, filter_rows_with_masks
+from melanoma.method2_v2.losses import SegmentationLoss
+from melanoma.method2_v2.seg_metrics import mean_dice_soft, mean_iou_binary
+from melanoma.method2_v2.unet import build_unet
 from melanoma.train_report import merge_train_report
 from melanoma.yaml_config import load_yaml_section, resolve_path
 

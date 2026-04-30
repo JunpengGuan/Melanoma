@@ -1,0 +1,43 @@
+shared:
+  image_dir: data/ISIC2017/Train/ISIC-2017_Training_Data
+  label_csv: data/ISIC2017/Train/ISIC-2017_Training_Part3_GroundTruth.csv
+  mask_dir: data/ISIC2017/Train/ISIC-2017_Training_Part1_GroundTruth
+  val_image_dir: data/ISIC2017/Val/ISIC-2017_Validation_Data
+  val_label_csv: data/ISIC2017/Val/ISIC-2017_Validation_Part3_GroundTruth.csv
+  val_mask_dir: data/ISIC2017/Val/ISIC-2017_Validation_Part1_GroundTruth
+  val_ratio: 0.15
+  num_workers: 2
+  seed: 42
+  unet_checkpoint: checkpoints/unet_last.pt
+
+train_seg:
+  epochs: 30
+  batch_size: 8
+  lr: 0.0001
+  checkpoint: checkpoints/unet_last.pt
+
+train_tabular:
+  use_gt_mask: false
+  feature_set: ABCD
+  tag: null
+  lr_out: null
+  xgb_out: null
+  val_threshold: 0.5
+  feature_table_out: null
+  val_feature_table_out: null
+  val_predictions_out: null
+  report_section: null
+
+eval_seg:
+  checkpoint: checkpoints/unet_last.pt
+  batch_size: 8
+  iou_thresh: 0.5
+  output: null
+
+eval_test:
+  classifier: lr
+  lr_path: checkpoints/method2_pred_mask_lr.joblib
+  xgb_path: checkpoints/method2_pred_mask_xgb.json
+  test_image_dir: data/ISIC2017/Test/ISIC-2017_Test_v2_Data
+  test_label_csv: data/ISIC2017/Test/ISIC-2017_Test_v2_Part3_GroundTruth.csv
+  threshold: 0.5
