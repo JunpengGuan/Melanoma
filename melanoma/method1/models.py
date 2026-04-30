@@ -5,10 +5,10 @@ from torchvision import models
 
 
 def build_classifier(backbone: str, pretrained: bool = True) -> nn.Module:
-"""
-Binary melanoma probability at logits (use BCEWithLogitsLoss).
-backbone: efficientnet_b0 | vit_b_16
-"""
+    """
+    Binary melanoma probability at logits (use BCEWithLogitsLoss).
+    backbone: efficientnet_b0 | vit_b_16
+    """
     b = backbone.lower().strip()
     weights = "DEFAULT" if pretrained else None
 
